@@ -8,7 +8,273 @@
 </head>
 <body>
     <div class="chat-container">
+        <div class="header"><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>chatApp</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="chat-container">
         <div class="header">
+            <h1>ChatApp</h1>
+            <p id="userCount">Live Users: 0</p>
+        </div>
+        <div id="messages"></div>
+        <div class="input-container">
+            <input type="text" id="message" placeholder="Enter Message"/>
+            <div class="file-input-wrapper">
+                <label for="fileInput" id="fileInputLabel" class="file-input-icon"></label>
+                <input type="file" id="fileInput" accept="image/*,video/*"/>
+            </div>
+            <button id="photoBtn"></button>
+            <button id="recordBtn"></button>
+            <button id="sendBtn">Send</button>
+        </div>
+        <div class="photo-container" style="display:none;">
+            <video id="videoPreview" autoplay></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+            <button id="captureBtn">Capture Photo</button>
+            <button id="cancelBtn">Cancel</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const sendBtn = document.getElementById("sendBtn");
+        const messageInput = document.getElementById("message");
+        const allMessages = document.getElementById("messages");
+        const fileInput = document.getElementById("fileInput");
+        const userCount = document.getElementById("userCount");
+
+        let userName;
+        while (!userName) {
+            userName = prompt("Please enter your name:");
+        }
+        socket.emit("set-username", userName);
+        
+        const scrollToBottom = () => {
+            allMessages.scrollTop = allMessages.scrollHeight;
+        };
+
+        socket.on("user-count", (count) => {
+            userCount.innerText = `Live Users: ${count}`;
+        });
+
+        socket.on("user-joined", (message) => {
+            const p = document.createElement("p");
+            p.innerText = message;
+            p.classList.add("user-joined");
+            allMessages.appendChild(p);
+            scrollToBottom();
+        });
+
+        socket.on("user-left", (message) => {
+            const p = document.createElement("p");
+            p.innerText = message;
+            p.classList.add("user-left");
+            allMessages.appendChild(p);
+        });
+
+        socket.on("message", ({ user, message }) => {
+            const messageContainer = document.createElement("div");
+            const p = document.createElement("p");
+            p.innerHTML = `<strong>${user}:</strong> ${message}`;
+            if (user === userName) {
+                messageContainer.classList.add("message-container", "sender-container");
+                p.classList.add("sender-message");
+            } else {
+                messageContainer.classList.add("message-container", "receiver-container");
+                p.classList.add("receiver-message");
+            }
+            messageContainer.appendChild(p);
+            allMessages.appendChild(messageContainer);
+            scrollToBottom();
+        });
+
+        socket.on("image", ({ user, image }) => {
+            const mediaContainer = document.createElement("div");
+            mediaContainer.classList.add("media-container");
+            
+            const p = document.createElement("p");
+            p.innerHTML = `<strong>${user}:</strong>`;
+
+            const img = document.createElement("img");
+            img.src = image;
+            img.classList.add("chat-image");
+
+            mediaContainer.appendChild(p);
+            mediaContainer.appendChild(img);
+
+            if (user === userName) {
+                mediaContainer.classList.add("message-container", "sender-container");
+            } else {
+                mediaContainer.classList.add("message-container", "receiver-container");
+            }
+
+            allMessages.appendChild(mediaContainer);
+            scrollToBottom();
+        });
+
+        socket.on("video", ({ user, video }) => {
+            const mediaContainer = document.createElement("div");
+            mediaContainer.classList.add("media-container");
+            
+            const p = document.createElement("p");
+            p.innerHTML = `<strong>${user}:</strong>`;
+
+            const videoElem = document.createElement("video");
+            videoElem.src = video;
+            videoElem.controls = true;
+            videoElem.classList.add("chat-video");
+
+            mediaContainer.appendChild(p);
+            mediaContainer.appendChild(videoElem);
+
+            if (user === userName) {
+                mediaContainer.classList.add("message-container", "sender-container");
+            } else {
+                mediaContainer.classList.add("message-container", "receiver-container");
+            }
+
+            allMessages.appendChild(mediaContainer);
+            scrollToBottom();
+        });
+
+        socket.on("audio", ({ user, audio }) => {
+            const mediaContainer = document.createElement("div");
+            mediaContainer.classList.add("media-container");
+
+            const p = document.createElement("p");
+            p.innerHTML = `<strong>${user}:</strong>`;
+
+            const audioBlob = new Blob([Uint8Array.from(atob(audio), c => c.charCodeAt(0))], { type: "audio/wav" });
+            const audioUrl = URL.createObjectURL(audioBlob);
+
+            const audioElem = document.createElement("audio");
+            audioElem.src = audioUrl;
+            audioElem.controls = true;
+            audioElem.classList.add("chat-audio");
+
+            mediaContainer.appendChild(p);
+            mediaContainer.appendChild(audioElem);
+
+            if (user === userName) {
+                mediaContainer.classList.add("message-container", "sender-container");
+            } else {
+                mediaContainer.classList.add("message-container", "receiver-container");
+            }
+
+            allMessages.appendChild(mediaContainer);
+            scrollToBottom();
+        });
+
+        let mediaRecorder;
+        let audioChunks = [];
+
+        recordBtn.addEventListener("click", async () => {
+            if (recordBtn.classList.contains("recording")) {
+                mediaRecorder.stop();
+                recordBtn.classList.remove("recording");
+                recordBtn.textContent = "";
+            } else {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                    };
+                    mediaRecorder.onstop = () => {
+                        const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+                        const reader = new FileReader();
+                        reader.onload = function() {
+                            const base64AudioMessage = reader.result.split(',')[1];
+                            socket.emit("audio", { user: userName, audio: base64AudioMessage });
+                        };
+                        reader.readAsDataURL(audioBlob);
+
+                        audioChunks = []; // Clear the chunks for the next recording
+                    };
+                    mediaRecorder.start();
+                    recordBtn.classList.add("recording");
+                    recordBtn.textContent = "⏹️ Stop";
+                    scrollToBottom();
+                } catch (err) {
+                    console.error("Failed to start recording:", err);
+                }
+            }
+        });
+
+        const sendMessage = () => {
+            const message = messageInput.value;
+            if (message) {
+                socket.emit("user-message", message);
+                messageInput.value = "";
+            }
+
+            const file = fileInput.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const fileUrl = e.target.result;
+                    if (file.type.startsWith("image/")) {
+                        socket.emit("image", fileUrl);
+                    } else if (file.type.startsWith("video/")) {
+                        socket.emit("video", fileUrl);
+                    }
+                };
+                reader.readAsDataURL(file);
+                fileInput.value = "";
+            }
+        };
+const photoBtn = document.getElementById("photoBtn");
+const videoPreview = document.getElementById("videoPreview");
+const canvas = document.getElementById("canvas");
+const captureBtn = document.getElementById("captureBtn");
+const cancelBtn = document.getElementById("cancelBtn");
+const photoContainer = document.querySelector(".photo-container");
+
+let cameraStream;
+
+photoBtn.addEventListener("click", async () => {
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        videoPreview.srcObject = cameraStream;
+        photoContainer.style.display = "block";
+    } catch (err) {
+        console.error("Failed to access the camera:", err);
+    }
+});
+
+captureBtn.addEventListener("click", () => {
+    canvas.width = videoPreview.videoWidth;
+    canvas.height = videoPreview.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(videoPreview, 0, 0, canvas.width, canvas.height);
+
+    const imageUrl = canvas.toDataURL("image/png");
+    socket.emit("image", imageUrl);
+
+    cameraStream.getTracks().forEach(track => track.stop());
+    photoContainer.style.display = "none";
+});
+
+cancelBtn.addEventListener("click", () => {
+    cameraStream.getTracks().forEach(track => track.stop());
+    photoContainer.style.display = "none";
+});
+
+        sendBtn.addEventListener("click", sendMessage);
+        messageInput.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") sendMessage();
+        });
+    </script>
+</body>
+</html>
+
             <h1>ChatApp</h1>
             <p id="userCount">Live Users: 0</p>
         </div>
